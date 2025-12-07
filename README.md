@@ -1,9 +1,3 @@
-# helloworld
+# 跟随撤回
 
-AstrBot 插件模板
-
-A template plugin for AstrBot plugin feature
-
-# 支持
-
-[帮助文档](https://astrbot.app)
+你撤回我也撤回

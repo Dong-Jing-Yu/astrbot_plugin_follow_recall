@@ -1,24 +1,64 @@
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
+from astrbot.api.event import filter
+from astrbot.core.message.message_event_result import MessageChain
 from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
+from astrbot.api import AstrBotConfig, logger
 
-@register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
-class MyPlugin(Star):
-    def __init__(self, context: Context):
+@register(
+    "astrbot_plugin_follow_recall",
+    "东经雨",
+    "在触发机器人回复的消息撤回后,机器人会同步撤回机器人回复消息",
+    "0.0.1"
+)
+class FollowRecallPlugin(Star):
+    def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
+        self.config = config
+        self.switch = self.config.get("Switch", True)
 
-    async def initialize(self):
-        """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+        # user_msg_id -> bot_msg_id
+        self.follow_map = {}
 
-    # 注册指令的装饰器。指令名为 helloworld。注册成功后，发送 `/helloworld` 就会触发这个指令，并回复 `你好, {user_name}!`
-    @filter.command("helloworld")
-    async def helloworld(self, event: AstrMessageEvent):
-        """这是一个 hello world 指令""" # 这是 handler 的描述，将会被解析方便用户了解插件内容。建议填写。
-        user_name = event.get_sender_name()
-        message_str = event.message_str # 用户发的纯文本消息字符串
-        message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
-        logger.info(message_chain)
-        yield event.plain_result(f"Hello, {user_name}, 你发了 {message_str}!") # 发送一条纯文本消息
+    # =====================================================
+    # ① 监听并记录：触发消息ID → 机器人回复ID
+    # =====================================================
+    @filter.on_decorating_result()
+    async def record_reply(self, event: AiocqhttpMessageEvent):
+        raw = event.message_obj.raw_message
+        if not isinstance(raw, dict):
+            return
+
+        user_msg_id = raw.get("message_id")
+        if not user_msg_id:
+            return
+
+        chain = event.get_result().chain
+        if not chain:
+            return
+
+        obmsg = await event._parse_onebot_json(MessageChain(chain=chain))
+        client = event.bot
+
+        # 发送机器人回复
+        if gid := event.get_group_id():
+            send_result = await client.send_group_msg(group_id=int(gid), message=obmsg)
+        elif uid := event.get_sender_id():
+            send_result = await client.send_private_msg(user_id=int(uid), message=obmsg)
+        else:
+            return
+
+        # 保存映射
+        if send_result and (bot_id := send_result.get("message_id")):
+            self.follow_map[str(user_msg_id)] = bot_id
+            logger.info(f"[跟随撤回] 记录映射 {user_msg_id} → {bot_id}")
+
+        # 阻止重复发送
+        chain.clear()
+        event.stop_event()
+
+    ### 暂无撤回事件监听接口 ###
+
 
     async def terminate(self):
-        """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        self.follow_map.clear()
+        logger.info("跟随撤回插件已卸载")

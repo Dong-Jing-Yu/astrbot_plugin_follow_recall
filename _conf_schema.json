@@ -1,0 +1,7 @@
+{
+  "Switch": {
+    "description": "开关",
+    "type": "bool",
+    "default": false
+  }
+}
